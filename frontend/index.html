@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>CKD Prediction System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <div class="container">
+      <div class="header">
+        <div class="header-icon">🩺</div>
+        <div>
+          <h1>CKD Risk Prediction</h1>
+          <p class="subtitle">AI-assisted kidney health screening tool</p>
+        </div>
+      </div>
+
+      <div class="disclaimer">
+        <span class="disclaimer-icon">⚠️</span>
+        <span>This tool provides a machine learning model output for <strong>educational purposes only</strong>. It is not a medical diagnosis. Always consult a qualified healthcare professional.</span>
+      </div>
+
+      <form id="predictForm">
+        <div class="form-grid">
+          <div class="field">
+            <label for="age">Age <span class="unit">(years)</span></label>
+            <input type="number" id="age" value="45" required>
+          </div>
+          <div class="field">
+            <label for="bp">Blood Pressure <span class="unit">(mmHg)</span></label>
+            <input type="number" id="bp" value="80" required>
+          </div>
+          <div class="field">
+            <label for="sg">Specific Gravity</label>
+            <input type="number" step="0.001" id="sg" value="1.02" required>
+          </div>
+          <div class="field">
+            <label for="al">Albumin <span class="unit">(0-5)</span></label>
+            <input type="number" id="al" value="1" required>
+          </div>
+          <div class="field">
+            <label for="bgr">Blood Glucose <span class="unit">(mg/dL)</span></label>
+            <input type="number" id="bgr" value="120" required>
+          </div>
+          <div class="field">
+            <label for="bu">Blood Urea <span class="unit">(mg/dL)</span></label>
+            <input type="number" id="bu" value="40" required>
+          </div>
+          <div class="field">
+            <label for="sc">Serum Creatinine <span class="unit">(mg/dL)</span></label>
+            <input type="number" step="0.01" id="sc" value="1.1" required>
+          </div>
+          <div class="field">
+            <label for="sod">Sodium <span class="unit">(mEq/L)</span></label>
+            <input type="number" id="sod" value="140" required>
+          </div>
+          <div class="field">
+            <label for="hemo">Hemoglobin <span class="unit">(g/dL)</span></label>
+            <input type="number" step="0.1" id="hemo" value="13.5" required>
+          </div>
+          <div class="field">
+            <label for="wbcc">WBC Count <span class="unit">(cells/cmm)</span></label>
+            <input type="number" id="wbcc" value="7800" required>
+          </div>
+        </div>
+
+        <button type="submit" id="submitBtn">
+          <span id="btnText">Run Prediction</span>
+          <span id="btnSpinner" class="spinner"></span>
+        </button>
+      </form>
+
+      <div id="result"></div>
+
+      <div class="footer">
+        Powered by a RandomForest model served via FastAPI
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = "http://127.0.0.1:8000";
+    const form = document.getElementById("predictForm");
+    const resultDiv = document.getElementById("result");
+    const submitBtn = document.getElementById("submitBtn");
+    const btnText = document.getElementById("btnText");
+    const btnSpinner = document.getElementById("btnSpinner");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      btnText.textContent = "Analyzing...";
+      btnSpinner.classList.add("active");
+      resultDiv.className = "";
+      resultDiv.innerHTML = "";
+
+      const payload = {
+        age: parseFloat(document.getElementById("age").value),
+        bp: parseFloat(document.getElementById("bp").value),
+        sg: parseFloat(document.getElementById("sg").value),
+        al: parseFloat(document.getElementById("al").value),
+        bgr: parseFloat(document.getElementById("bgr").value),
+        bu: parseFloat(document.getElementById("bu").value),
+        sc: parseFloat(document.getElementById("sc").value),
+        sod: parseFloat(document.getElementById("sod").value),
+        hemo: parseFloat(document.getElementById("hemo").value),
+        wbcc: parseFloat(document.getElementById("wbcc").value),
+      };
+
+      // small artificial delay so the spinner/animation is visible
+      const [res] = await Promise.all([
+        fetch(`${API_URL}/predict`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(err => ({ networkError: err })),
+        new Promise(r => setTimeout(r, 500)),
+      ]);
+
+      submitBtn.disabled = false;
+      btnText.textContent = "Run Prediction";
+      btnSpinner.classList.remove("active");
+
+      if (!res || res.networkError) {
+        resultDiv.className = "show error";
+        resultDiv.innerHTML = `<div class="result-title">⚠ Request Failed</div><div>${res?.networkError?.message || "Could not reach the API."}</div>`;
+        return;
+      }
+
+      try {
+        const data = await res.json();
+
+        if (!res.ok) {
+          resultDiv.className = "show error";
+          resultDiv.innerHTML = `<div class="result-title">⚠ Validation Error</div><div>${JSON.stringify(data.detail)}</div>`;
+          return;
+        }
+
+        const isCKD = data.prediction === "CKD";
+        const confidence = Math.max(...data.model_output_probability) * 100;
+
+        resultDiv.className = "show " + (isCKD ? "ckd" : "notckd");
+        resultDiv.innerHTML = `
+          <div class="result-header">
+            <span class="result-badge">${isCKD ? "🔴" : "🟢"}</span>
+            <div>
+              <div class="result-title">${data.prediction === "CKD" ? "CKD Indicated" : "No CKD Indicated"}</div>
+              <div class="result-sub">Model confidence: ${confidence.toFixed(1)}%</div>
+            </div>
+          </div>
+          <div class="confidence-bar">
+            <div class="confidence-fill" style="width:${confidence}%"></div>
+          </div>
+          <div class="result-note">${data.note}</div>
+        `;
+      } catch (err) {
+        resultDiv.className = "show error";
+        resultDiv.innerHTML = `<div class="result-title">⚠ Unexpected Error</div><div>${err.message}</div>`;
+      }
+    });
+  </script>
+</body>
+</html>
